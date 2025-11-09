@@ -1,0 +1,38 @@
+# Ambiente virtual
+.venv/
+__pycache__/
+
+# Datasets e variações
+datasets*/
+train/
+val/
+test/
+logs/
+nao_reconhecido/
+variacoes_salvas/
+
+# Modelos e pesos
+*.h5
+*.tflite
+*.ckpt
+*.pth
+*.onnx
+
+# Saídas e métricas
+*.csv
+*.txt
+*.xlsx
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Configurações locais
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Cache e metadados
+.ipynb_checkpoints/
+*.bak

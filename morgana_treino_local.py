@@ -1,233 +1,197 @@
 # =========================================
-# 🌿 MORGANA AI - Treinamento completo local
-# TensorFlow 2.14 | Ajustado com Data Augmentation avançado
+# 🌿 MORGANA AI - Treinamento com EfficientNetV2S e Métricas de Background
 # =========================================
 
-import os
+import os, random, psutil
 import numpy as np
 import tensorflow as tf
+from pathlib import Path
+from tensorflow.keras.applications import EfficientNetV2S
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, Dropout, GlobalAveragePooling2D, BatchNormalization
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
+from tensorflow.keras.losses import CategoricalCrossentropy
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.metrics import Precision, Recall
+from sklearn.metrics import classification_report, confusion_matrix, f1_score, recall_score, precision_score, precision_recall_fscore_support
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.models import Sequential, Model
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, GlobalAveragePooling2D
-from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.callbacks import EarlyStopping, Callback, ReduceLROnPlateau
-from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.utils import class_weight
 
 # =========================================
-# CONFIGURAÇÕES DE CAMINHO
+# CONFIG
 # =========================================
-base_path = r"F:\Projetos\morganaAI\datasets_aumentado"
-train_dir = os.path.join(base_path, "train")
-val_dir   = os.path.join(base_path, "val")
-test_dir  = os.path.join(base_path, "test")
+IMG_SIZE = (260, 260)
+BATCH_SIZE = 32
+EPOCHS_FASE1 = 25
+EPOCHS_FASE2 = 15
+BASE_LR = 1e-4
+FINE_TUNE_LR = 1e-5
+DATA_DIR = Path(r"F:\Projetos\Morgana-AI\datasets_balanceado_v2")
+MODEL_NAME = "morganaAI_EfficientNetV2S_bg"
 
-print("✅ Dataset carregado em:", base_path)
-print("TensorFlow versão:", tf.__version__)
+random.seed(42)
+np.random.seed(42)
+tf.random.set_seed(42)
+
+print(f"💻 CPU: {psutil.cpu_count(logical=True)} núcleos")
+print("🧠 GPU detectada:", tf.config.list_physical_devices('GPU'))
 
 # =========================================
-# GERADORES DE IMAGEM (DATA AUGMENTATION AVANÇADO)
+# DATA AUGMENTATION
 # =========================================
-train_gen = ImageDataGenerator(
+train_gen = tf.keras.preprocessing.image.ImageDataGenerator(
     rescale=1./255,
-    rotation_range=35,            # mais variação de ângulo
-    zoom_range=0.3,               # simula distâncias diferentes
-    shear_range=0.25,             # leve distorção
-    width_shift_range=0.15,       # deslocamento horizontal
-    height_shift_range=0.15,      # deslocamento vertical
-    brightness_range=[0.6, 1.5],  # simula luz/sombra
-    channel_shift_range=30.0,     # variação de cor entre folhas
-    horizontal_flip=True,
-    vertical_flip=True,
-    fill_mode='nearest'
+    rotation_range=25,
+    zoom_range=0.25,
+    shear_range=0.15,
+    width_shift_range=0.15,
+    height_shift_range=0.15,
+    brightness_range=[0.7, 1.4],
+    horizontal_flip=True
 )
 
-val_gen = ImageDataGenerator(rescale=1./255)
+val_gen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255)
 
-train_data = train_gen.flow_from_directory(
-    train_dir, target_size=(150,150),
-    class_mode='categorical', batch_size=32
-)
-val_data = val_gen.flow_from_directory(
-    val_dir, target_size=(150,150),
-    class_mode='categorical', batch_size=32
-)
-test_data = val_gen.flow_from_directory(
-    test_dir, target_size=(150,150),
-    class_mode='categorical', shuffle=False
-)
+train_data = train_gen.flow_from_directory(DATA_DIR / "train", target_size=IMG_SIZE, batch_size=BATCH_SIZE, class_mode='categorical')
+val_data = val_gen.flow_from_directory(DATA_DIR / "val", target_size=IMG_SIZE, batch_size=BATCH_SIZE, class_mode='categorical')
+test_data = val_gen.flow_from_directory(DATA_DIR / "test", target_size=IMG_SIZE, batch_size=BATCH_SIZE, class_mode='categorical', shuffle=False)
 
-class_names = list(train_data.class_indices.keys())
-print("Classes detectadas:", class_names)
+print(f"📁 Dataset: {len(train_data.class_indices)} classes → {train_data.class_indices}")
 
 # =========================================
-# CALLBACK VISUAL PARA PLOTS AO FINAL DE CADA ÉPOCA
+# MODELO
 # =========================================
-class VisualizaPrevisoesCallback(Callback):
-    def __init__(self, data, class_names):
-        super().__init__()
-        self.data = data
-        self.class_names = class_names
-
-    def on_epoch_end(self, epoch, logs=None):
-        images, labels = next(self.data)
-        preds = self.model.predict(images)
-        fig, axs = plt.subplots(2, 5, figsize=(20, 8))
-        fig.suptitle(f"Época {epoch + 1} - Previsões vs Real", fontsize=16)
-        for i, ax in enumerate(axs.flat):
-            ax.imshow(images[i])
-            pred_idx = np.argmax(preds[i])
-            true_idx = np.argmax(labels[i])
-            cor = 'green' if pred_idx == true_idx else 'red'
-            ax.set_title(f"Prev: {self.class_names[pred_idx]}\nReal: {self.class_names[true_idx]}", color=cor)
-            ax.axis('off')
-        plt.tight_layout()
-        plt.show()
-
-# =========================================
-# FASE 1 - CNN BASE
-# =========================================
-print("\n🧠 FASE 1 - Treinamento CNN Base")
-
-cnn_model = Sequential([
-    Conv2D(32, (3,3), activation='relu', input_shape=(150,150,3)),
-    MaxPooling2D(2,2),
-    Conv2D(64, (3,3), activation='relu'),
-    MaxPooling2D(2,2),
-    Conv2D(128, (3,3), activation='relu'),
-    MaxPooling2D(2,2),
-    Flatten(),
-    Dense(256, activation='relu'),
-    Dropout(0.5),
-    Dense(len(class_names), activation='softmax')
-])
-
-cnn_model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
-    loss='categorical_crossentropy',
-    metrics=['accuracy']
-)
-
-early = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-hist1 = cnn_model.fit(
-    train_data,
-    validation_data=val_data,
-    epochs=15,
-    callbacks=[early, VisualizaPrevisoesCallback(val_data, class_names)]
-)
-print("✅ CNN Base concluída.")
-
-# =========================================
-# FASE 2 - TRANSFER LEARNING (MobileNetV2)
-# =========================================
-print("\n⚙️ FASE 2 - Transfer Learning com MobileNetV2")
-
-base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(150,150,3))
+base_model = EfficientNetV2S(weights='imagenet', include_top=False, input_shape=(*IMG_SIZE, 3))
 base_model.trainable = False
 
 x = GlobalAveragePooling2D()(base_model.output)
 x = Dense(256, activation='relu')(x)
-x = Dropout(0.5)(x)
-output = Dense(len(class_names), activation='softmax')(x)
+x = BatchNormalization()(x)
+x = Dropout(0.4)(x)
+output = Dense(len(train_data.class_indices), activation='softmax')(x)
+model = Model(base_model.input, output)
 
-model_v2 = Model(inputs=base_model.input, outputs=output)
-
-model_v2.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
-    loss='categorical_crossentropy',
-    metrics=['accuracy']
+model.compile(
+    optimizer=Adam(learning_rate=BASE_LR),
+    loss=CategoricalCrossentropy(label_smoothing=0.05),
+    metrics=['accuracy', Precision(), Recall()]
 )
 
-hist2 = model_v2.fit(
-    train_data,
-    validation_data=val_data,
-    epochs=15,
-    callbacks=[
-        ReduceLROnPlateau(monitor='val_loss', factor=0.3, patience=2),
-        EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
-        VisualizaPrevisoesCallback(val_data, class_names)
-    ]
-)
-print("✅ Transfer Learning concluído.")
+# =========================================
+# CALLBACKS
+# =========================================
+callbacks = [
+    EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
+    ReduceLROnPlateau(factor=0.4, patience=3, min_lr=1e-6),
+    ModelCheckpoint(f"{MODEL_NAME}_best.h5", save_best_only=True)
+]
 
 # =========================================
-# FASE 3 - FINE-TUNING
+# TREINAMENTO
 # =========================================
-print("\n🚀 FASE 3 - Fine-Tuning (ajuste fino das últimas camadas)")
+print("\n🚀 Fase 1: Treinamento base congelado")
+model.fit(train_data, validation_data=val_data, epochs=EPOCHS_FASE1, callbacks=callbacks, verbose=1)
 
-for layer in base_model.layers[-40:]:
+print("\n🔧 Fase 2: Fine-tuning (últimas camadas destravadas)")
+for layer in base_model.layers[-80:]:
     layer.trainable = True
 
-model_v2.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5),
-    loss='categorical_crossentropy',
-    metrics=['accuracy']
+model.compile(
+    optimizer=Adam(learning_rate=FINE_TUNE_LR),
+    loss=CategoricalCrossentropy(label_smoothing=0.05),
+    metrics=['accuracy', Precision(), Recall()]
 )
 
-hist3 = model_v2.fit(
-    train_data,
-    validation_data=val_data,
-    epochs=15,
-    callbacks=[
-        ReduceLROnPlateau(monitor='val_loss', factor=0.3, patience=2),
-        EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
-        VisualizaPrevisoesCallback(val_data, class_names)
-    ]
-)
-print("✅ Fine-Tuning concluído.")
+model.fit(train_data, validation_data=val_data, epochs=EPOCHS_FASE2, callbacks=callbacks, verbose=1)
 
 # =========================================
-# AVALIAÇÃO FINAL E SALVAMENTO
+# AVALIAÇÃO
 # =========================================
-print("\n📊 Avaliando modelo final...")
-
-y_pred = np.argmax(model_v2.predict(test_data), axis=1)
+print("\n📊 Avaliando desempenho final...")
+Y_pred = model.predict(test_data)
+y_pred = np.argmax(Y_pred, axis=1)
 y_true = test_data.classes
-print(classification_report(y_true, y_pred, target_names=class_names))
+labels = list(test_data.class_indices.keys())
 
+# Matriz de confusão
 cm = confusion_matrix(y_true, y_pred)
 plt.figure(figsize=(10,8))
-sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
-            xticklabels=class_names, yticklabels=class_names)
-plt.xlabel("Previsto")
-plt.ylabel("Real")
-plt.title("Matriz de Confusão - Modelo Final")
+sns.heatmap(cm, annot=True, fmt="d", cmap="Greens", xticklabels=labels, yticklabels=labels)
+plt.title("Matriz de Confusão - Morgana AI EfficientNetV2S")
+plt.xlabel("Previsto"); plt.ylabel("Real")
+plt.tight_layout()
+plt.savefig(f"{MODEL_NAME}_matriz_confusao.png", dpi=150)
 plt.show()
 
-# =========================================
-# GRÁFICOS DE EVOLUÇÃO DAS FASES
-# =========================================
-def plot_history(hist, titulo):
-    plt.figure(figsize=(6,4))
-    plt.plot(hist.history['accuracy'], label='Treino')
-    plt.plot(hist.history['val_accuracy'], label='Validação')
-    plt.title(titulo)
-    plt.xlabel('Épocas')
-    plt.ylabel('Acurácia')
-    plt.legend()
-    plt.grid()
-    plt.show()
-
-plot_history(hist1, "Fase 1 - CNN Base")
-plot_history(hist2, "Fase 2 - Transfer Learning")
-plot_history(hist3, "Fase 3 - Fine-Tuning")
+# Relatório geral
+report = classification_report(y_true, y_pred, target_names=labels, digits=3)
+print(report)
 
 # =========================================
-# SALVANDO MODELOS
+# MÉTRICAS ESPECÍFICAS DE BACKGROUND
 # =========================================
-model_v2.save("modelo_morgana_final.h5")
+if "nao_reconhecido" in labels:
+    idx_bg = labels.index("nao_reconhecido")
+    y_true_bg = (y_true == idx_bg).astype(int)
+    y_pred_bg = (y_pred == idx_bg).astype(int)
 
-converter = tf.lite.TFLiteConverter.from_keras_model(model_v2)
-converter.optimizations = [tf.lite.Optimize.DEFAULT]  # otimiza para dispositivos embarcados
+    f1_bg = f1_score(y_true_bg, y_pred_bg)
+    rec_bg = recall_score(y_true_bg, y_pred_bg)
+    prec_bg = precision_score(y_true_bg, y_pred_bg)
+
+    print(f"\n🎯 Métricas específicas da classe 'nao_reconhecido':")
+    print(f"   ➤ Precision: {prec_bg:.3f}")
+    print(f"   ➤ Recall:    {rec_bg:.3f}")
+    print(f"   ➤ F1-score:  {f1_bg:.3f}")
+else:
+    print("\n⚠️ Classe 'nao_reconhecido' não encontrada no conjunto de teste!")
+
+# =========================================
+# GRÁFICOS DE MÉTRICAS POR CLASSE
+# =========================================
+precisions, recalls, f1s, _ = precision_recall_fscore_support(y_true, y_pred, labels=np.arange(len(labels)))
+df_metrics = pd.DataFrame({
+    "Classe": labels,
+    "Precision": precisions,
+    "Recall": recalls,
+    "F1-Score": f1s
+}).sort_values("F1-Score", ascending=False)
+
+df_metrics.to_csv(f"{MODEL_NAME}_metricas_por_classe.csv", index=False, encoding="utf-8-sig")
+
+plt.figure(figsize=(10, 5))
+sns.barplot(data=df_metrics, x="Classe", y="F1-Score", palette="crest")
+plt.xticks(rotation=45, ha="right")
+plt.title("📈 F1-Score por Classe (incluindo 'nao_reconhecido')")
+plt.ylabel("F1-Score"); plt.ylim(0, 1)
+plt.tight_layout()
+plt.savefig(f"{MODEL_NAME}_f1_por_classe.png", dpi=150)
+plt.show()
+
+plt.figure(figsize=(10, 5))
+df_melted = df_metrics.melt(id_vars="Classe", value_vars=["Precision", "Recall"], var_name="Métrica", value_name="Valor")
+sns.barplot(data=df_melted, x="Classe", y="Valor", hue="Métrica", palette="viridis")
+plt.xticks(rotation=45, ha="right")
+plt.title("📊 Precision vs Recall por Classe")
+plt.ylim(0, 1)
+plt.tight_layout()
+plt.savefig(f"{MODEL_NAME}_precision_recall_por_classe.png", dpi=150)
+plt.show()
+
+print(f"✅ Gráficos salvos:")
+print(f"   - {MODEL_NAME}_f1_por_classe.png")
+print(f"   - {MODEL_NAME}_precision_recall_por_classe.png")
+print(f"   - {MODEL_NAME}_metricas_por_classe.csv")
+
+# =========================================
+# EXPORTAÇÃO TFLITE
+# =========================================
+model.save(f"{MODEL_NAME}_final.h5")
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
+converter.optimizations = [tf.lite.Optimize.DEFAULT]
 tflite_model = converter.convert()
-
-with open("modelo_morgana_final.tflite", "wb") as f:
+with open(f"{MODEL_NAME}_final_INT8.tflite", "wb") as f:
     f.write(tflite_model)
 
-print("\n🎉 Treinamento completo!")
-print("Modelos salvos em:")
-print(" - modelo_morgana_final.h5")
-print(" - modelo_morgana_final.tflite")
+print("\n✅ Treinamento concluído e modelo exportado com sucesso!")
