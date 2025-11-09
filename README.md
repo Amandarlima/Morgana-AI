@@ -1,13 +1,11 @@
-#MorganaAI – Classificador de Pragas em Morangos Portátil
+MorganaAI – Classificador de Pragas em Morangos 
 
-MorganaAI é um sistema embarcado com **inteligência artificial** desenvolvido para **detecção e classificação de pragas em morangos em tempo real**.  
+MorganaAI é um modelo de **inteligência artificial** desenvolvido para **detecção e classificação de pragas em morangos em tempo real**.  
 O modelo foi treinado com técnicas de *Transfer Learning* (usando **MobileNetV2**) e otimizado para execução em dispositivos de baixo custo, como a **Raspberry Pi**.
-
-O sistema permite identificar diversas pragas diretamente no campo, exibindo na tela o nome da praga detectada e sugestões de manejo, auxiliando o produtor rural na tomada de decisão imediata.
 
 ---
 
-##🚀Tecnologias Utilizadas
+🚀Tecnologias Utilizadas
 
 - **Python 3.10**
 - **TensorFlow 2.14.0**
@@ -20,7 +18,7 @@ O sistema permite identificar diversas pragas diretamente no campo, exibindo na 
 
 ---
 
-##Estrutura do Projeto
+Estrutura do Projeto
 
 ```
 Morgana-AI/
@@ -37,11 +35,11 @@ Morgana-AI/
 
 ---
 
-##Dataset – MorganaAI
+Dataset – MorganaAI
 
 Antes de rodar o projeto, é necessário baixar o dataset utilizado nos scripts de pré-processamento e treinamento.
 
-###Passos para configuração
+Passos para configuração
 
 1. **Acesse a pasta oficial do projeto no Google Drive:**
    👉 [MorganaAI - Google Drive](https://drive.google.com/drive/folders/1k1wPIpe3yUI3VJjb67UL81gTwHdqHR6S?usp=sharing)
@@ -81,7 +79,7 @@ Antes de rodar o projeto, é necessário baixar o dataset utilizado nos scripts 
 
 ---
 
-###Sobre a classe “não reconhecido”
+Sobre a classe “não reconhecido”
 
 A classe **`não reconhecido`** (ou *background*) contém imagens **aleatórias** — como pessoas, ruas, folhas, prédios e outros cenários que **não representam morangos nem pragas**.  
 Ela é essencial para que a IA aprenda a **ignorar contextos irrelevantes**, reduzindo falsos positivos e tornando o modelo mais confiável em campo.
@@ -90,7 +88,7 @@ Essa abordagem segue boas práticas de *robust training* adotadas em sistemas de
 
 ---
 
-##Saídas e Resultados
+Saídas e Resultados
 
 Após o treinamento, o modelo gera automaticamente:
 
@@ -101,14 +99,3 @@ Após o treinamento, o modelo gera automaticamente:
 - 📉 `morganaAI_evolucao.png` — Evolução das curvas de treinamento e validação por época.
 
 ---
-
-##Resumo do fluxo de execução
-
-```
-Baixar pastas do Drive ➜ Instalar dependências ➜ Rodar preprocessamento
-➜ Gerar datasets_balanceado_v2 ➜ Rodar treino_local
-➜ Gerar modelo final (.h5 / .tflite) + métricas (CSV, gráficos, matriz de confusão)
-```
-
----
-
